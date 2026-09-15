@@ -1,0 +1,54 @@
+# Publish the homenet-smokescreen image (cmd/homenet-smokescreen) to GHCR.
+# Tags: `homenet` tracks master; `homenet-<sha>` is immutable; a git tag
+# `homenet-v*` publishes `homenet-v*` too. homenet's deploy.sh pulls
+# ghcr.io/bennydogg/smokescreen:homenet by default (pin a sha tag in
+# /opt/smokescreen/.env on remora to freeze a known-good build).
+name: homenet image
+
+on:
+  push:
+    branches: [master]
+    tags: ["homenet-v*"]
+  pull_request:
+    paths:
+      - "cmd/homenet-smokescreen/**"
+      - "Dockerfile"
+      - ".github/workflows/homenet-image.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    name: Build (and push on master/tags)
+    runs-on: ubuntu-latest
+    env:
+      GOFLAGS: -mod=vendor
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: "1.25"
+          cache: true
+      - name: Vet and test the wrapper
+        run: |
+          go vet ./cmd/homenet-smokescreen/...
+          go test -v -timeout 2m ./cmd/homenet-smokescreen/...
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ghcr.io/${{ github.repository }}:homenet
+            ghcr.io/${{ github.repository }}:homenet-${{ github.sha }}
+            ${{ startsWith(github.ref, 'refs/tags/homenet-v') && format('ghcr.io/{0}:{1}', github.repository, github.ref_name) || '' }}
